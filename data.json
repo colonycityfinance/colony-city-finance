@@ -1,0 +1,19 @@
+{
+  "leads": [
+    {
+      "id": 1,
+      "name": "JSON Storage Test",
+      "phone": "229-425-0505",
+      "loanAmount": "$5000",
+      "creditScore": "670-739",
+      "employmentStatus": "Employed full-time",
+      "monthlyIncome": "$3500",
+      "qualificationScore": "hot",
+      "summary": "JSON Storage Test seeking $5000. Credit: 670-739. Employment: Employed full-time. Income: $3500/mo.",
+      "createdAt": "2026-06-29T19:36:40.873Z"
+    }
+  ],
+  "messages": [],
+  "nextLeadId": 2,
+  "nextMessageId": 1
+}

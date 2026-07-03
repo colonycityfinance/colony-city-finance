@@ -1,0 +1,345 @@
+import type { Express } from "express";
+import type { Server } from "http";
+import { storage } from "./storage";
+import { z } from "zod";
+import OpenAI from "openai";
+import { Resend } from "resend";
+import twilio from "twilio";
+
+// ADMIN_PASSWORD must be set via env — no hardcoded fallback
+function getAdminPassword() {
+  const pw = process.env.ADMIN_PASSWORD;
+  if (!pw) throw new Error("ADMIN_PASSWORD env var not set");
+  return pw;
+}
+
+// Simple brute-force guard for admin login
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+function checkLoginRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (entry && now < entry.resetAt) {
+    if (entry.count >= 5) return false; // blocked
+    entry.count++;
+  } else {
+    loginAttempts.set(ip, { count: 1, resetAt: now + 15 * 60 * 1000 });
+  }
+  return true;
+}
+
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER;
+
+const CALLBACK_MESSAGE = `Thank you so much for pre-qualifying with Colony City Finance. Your pre-qualification looks great, and we are so excited to work with you! A loan advisor will be with you shortly. In the meantime, there are a few things you will want to have ready to make the process quick and easy. You will need your Social Security card, proof of income, and a valid Georgia ID. If you would like to get a head start, you are welcome to email those documents to michael at colony city finance dot com. Again, thank you for choosing Colony City Finance, and an advisor will be reaching out to you very soon.`;
+
+async function sendCallbackSMS(toPhone: string) {
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_FROM_NUMBER) {
+    console.warn("Twilio credentials not configured — SMS skipped");
+    return null;
+  }
+  try {
+    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    const message = await client.messages.create({
+      to: toPhone,
+      from: TWILIO_FROM_NUMBER,
+      body: `Hi! Thank you for pre-qualifying with Colony City Finance. Your pre-qualification looks great! 🎉\n\nTo speed up your process, please have the following ready:\n• Social Security card\n• Proof of income\n• Valid Georgia ID\n\nYou can email documents to michael@colonycityfinance.com\n\nA loan advisor will be calling you shortly!`,
+    });
+    console.log(`SMS sent: ${message.sid} to ${toPhone}`);
+    return message.sid;
+  } catch (err: any) {
+    console.error("Twilio SMS failed:", err?.message);
+    throw err;
+  }
+}
+
+async function makeCallbackCall(toPhone: string, appBaseUrl: string) {
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_FROM_NUMBER) {
+    console.warn("Twilio credentials not configured — outbound call skipped");
+    return null;
+  }
+  try {
+    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    const call = await client.calls.create({
+      to: toPhone,
+      from: TWILIO_FROM_NUMBER,
+      twiml: `<Response><Say voice="Polly.Joanna-Neural">${CALLBACK_MESSAGE}</Say></Response>`,
+    });
+    console.log(`Outbound callback call initiated: ${call.sid} to ${toPhone}`);
+    return call.sid;
+  } catch (err: any) {
+    console.error("Twilio callback call failed:", err?.message);
+    throw err;
+  }
+}
+
+const SYSTEM_PROMPT = `You are Steph, a warm and personable loan advisor for Colony City Finance. You have a friendly, upbeat personality — like a helpful person at a local bank who genuinely wants to see you succeed. Your job is to pre-qualify someone for a personal loan by collecting 6 pieces of information, then close by telling them a specialist will call.
+
+Collect in this order:
+1. First name
+2. Loan amount needed
+3. Credit score range (Below 580 / 580-669 / 670-739 / 740-799 / 800+)
+4. Employment status (Employed full-time / part-time / Self-employed / Unemployed / Retired)
+5. Monthly gross income
+6. Phone number
+
+Personality guidelines:
+- Be warm and encouraging — a quick genuine comment on their answer is great (e.g. "That's a solid goal!" or "Good to know!")
+- Light personality is welcome, but keep it brief — one short reaction, then the next question
+- Never judgmental about credit scores or income — always reassuring
+- If someone has a lower credit score, briefly mention Colony City Finance works with all credit profiles
+
+Strict rules:
+- Keep every message to 2-3 sentences MAX — reaction + next question
+- Ask ONE question per message
+- Be flexible with answers — if someone gives a reasonable, natural-language answer that contains the info you need, accept it and move on. Do NOT require them to use exact wording or pick from a list.
+- Examples of acceptable answers: "I make about 3 grand a month" (monthly income), "I work full time at a warehouse" (employed full-time), "somewhere around 650" (credit score range 580-669), "my number is 229-555-1234" (phone number)
+- Only re-ask if the answer is genuinely unrelated or completely unclear — for example, if someone responds with a joke, a question back to you, or something totally off-topic. In that case, gently redirect: "Ha, let me keep us moving — [re-ask the same question]?"
+- NEVER discuss topics outside of the pre-qualification process — no financial advice, no tangents beyond one brief warm reaction
+- Never give financial advice, specific rates, or guarantees
+- Stay focused on the pre-qualification — don't let the conversation drift more than one exchange
+- After collecting all 6 items, give a warm 2-sentence closing and say a loan specialist will call them shortly
+- Do NOT make specific loan offers, rates, or guarantees
+
+When you have collected ALL required information (name, loan amount, credit score, employment status, monthly income, phone number), end your final message with this exact JSON block on a new line:
+<QUALIFICATION_COMPLETE>
+{"name":"<name>","loanAmount":"<amount>","creditScore":"<score range>","employmentStatus":"<status>","monthlyIncome":"<income>","phone":"<phone>","score":"<hot|warm|cold>"}
+</QUALIFICATION_COMPLETE>
+
+Score rubric:
+- hot: credit 670+, employed, income $3000+/mo
+- warm: credit 580-669, OR income $2000-2999/mo, OR part-time/self-employed
+- cold: credit below 580, OR unemployed, OR income below $2000/mo
+
+Start by warmly greeting the visitor and asking their first name.`;
+
+let pplxClient: OpenAI | null = null;
+function getClient() {
+  if (!pplxClient) {
+    const key = process.env.PPLX_API_KEY;
+    if (!key) throw new Error("PPLX_API_KEY not set");
+    pplxClient = new OpenAI({ apiKey: key, baseURL: "https://api.perplexity.ai" });
+  }
+  return pplxClient;
+}
+
+async function sendLeadNotification(lead: {
+  name: string;
+  phone: string;
+  loanAmount: string;
+  creditScore: string;
+  employmentStatus: string;
+  monthlyIncome: string;
+  qualificationScore: string;
+}) {
+  // Check both the direct env var and the pplx.app credential proxy var name
+  const resendKey = process.env.RESEND_API_KEY || process.env.CUSTOM_CRED_API_RESEND_COM_TOKEN;
+  if (!resendKey) {
+    console.warn("Email notifications not configured — set RESEND_API_KEY");
+    return;
+  }
+
+  const scoreEmoji = lead.qualificationScore === "hot" ? "🔥" : lead.qualificationScore === "warm" ? "🌤️" : "❄️";
+  const scoreLabel = lead.qualificationScore.toUpperCase();
+  const scoreColor = lead.qualificationScore === "hot" ? "#ef4444" : lead.qualificationScore === "warm" ? "#f59e0b" : "#60a5fa";
+
+  const resend = new Resend(resendKey);
+  const { error } = await resend.emails.send({
+    from: "Colony City Finance Leads <onboarding@resend.dev>",
+    to: "michael@colonycityfinance.com",
+    subject: `${scoreEmoji} New Loan Lead: ${lead.name} (${scoreLabel})`,
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#0f172a;color:#f1f5f9;padding:32px;border-radius:12px">
+        <h2 style="color:#f59e0b;margin:0 0 8px">New Pre-Qualification Completed</h2>
+        <p style="color:#94a3b8;margin:0 0 24px">Someone just finished the Colony City Finance chatbot. Here are their details:</p>
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td style="padding:10px 0;border-bottom:1px solid #1e293b;color:#94a3b8;width:45%">Name</td><td style="padding:10px 0;border-bottom:1px solid #1e293b;font-weight:600">${lead.name}</td></tr>
+          <tr><td style="padding:10px 0;border-bottom:1px solid #1e293b;color:#94a3b8">Phone</td><td style="padding:10px 0;border-bottom:1px solid #1e293b;font-weight:600">${lead.phone}</td></tr>
+          <tr><td style="padding:10px 0;border-bottom:1px solid #1e293b;color:#94a3b8">Loan Amount</td><td style="padding:10px 0;border-bottom:1px solid #1e293b">${lead.loanAmount}</td></tr>
+          <tr><td style="padding:10px 0;border-bottom:1px solid #1e293b;color:#94a3b8">Credit Score</td><td style="padding:10px 0;border-bottom:1px solid #1e293b">${lead.creditScore}</td></tr>
+          <tr><td style="padding:10px 0;border-bottom:1px solid #1e293b;color:#94a3b8">Employment</td><td style="padding:10px 0;border-bottom:1px solid #1e293b">${lead.employmentStatus}</td></tr>
+          <tr><td style="padding:10px 0;border-bottom:1px solid #1e293b;color:#94a3b8">Monthly Income</td><td style="padding:10px 0;border-bottom:1px solid #1e293b">${lead.monthlyIncome}/mo</td></tr>
+          <tr><td style="padding:10px 0;color:#94a3b8">Lead Score</td><td style="padding:10px 0;font-weight:700;color:${scoreColor}">${scoreEmoji} ${scoreLabel}</td></tr>
+        </table>
+        <p style="margin:24px 0 0;color:#94a3b8;font-size:13px">Call them as soon as possible — hot and warm leads convert best within the first hour.</p>
+      </div>
+    `,
+  });
+
+  if (error) {
+    console.error("Resend email error:", JSON.stringify(error));
+  } else {
+    console.log(`Lead notification email sent for ${lead.name}`);
+  }
+}
+
+// Schemas
+const saveTurnSchema = z.object({
+  sessionId: z.string(),
+  userMessage: z.string().max(1000),
+  assistantMessage: z.string().max(4000),
+});
+
+const saveLeadSchema = z.object({
+  sessionId: z.string(),
+  name: z.string(),
+  phone: z.string(),
+  loanAmount: z.string(),
+  creditScore: z.string(),
+  employmentStatus: z.string(),
+  monthlyIncome: z.string(),
+  qualificationScore: z.string(),
+});
+
+export async function registerRoutes(httpServer: Server, app: Express) {
+
+  // Health check — used by the frontend keep-alive ping to warm the sandbox
+  app.get("/api/health", (_req, res) => {
+    const resendKey = process.env.RESEND_API_KEY || process.env.CUSTOM_CRED_API_RESEND_COM_TOKEN;
+    res.json({ ok: true, resendKeyPresent: !!resendKey });
+  });
+
+  // Email diagnostic — admin-only (gated with x-admin-password header)
+  app.get("/api/email-test", async (req, res) => {
+    let adminPw: string;
+    try { adminPw = getAdminPassword(); } catch { return res.status(500).json({ error: "Server misconfigured" }); }
+    if (req.headers["x-admin-password"] !== adminPw) return res.status(401).json({ error: "Unauthorized" });
+    const resendKey = process.env.RESEND_API_KEY || process.env.CUSTOM_CRED_API_RESEND_COM_TOKEN;
+    if (!resendKey) return res.status(500).json({ error: "RESEND_API_KEY not set in server environment" });
+    try {
+      const resend = new Resend(resendKey);
+      const { error } = await resend.emails.send({
+        from: "Colony City Finance Leads <onboarding@resend.dev>",
+        to: "michael@colonycityfinance.com",
+        subject: "✅ Server Email Test — System Working",
+        html: "<div style='font-family:sans-serif;padding:24px;background:#0f172a;color:#f1f5f9;border-radius:12px'><h2 style='color:#f59e0b'>Server Email Confirmed</h2><p>The live Colony City Finance server successfully sent this email. All future leads will trigger an email automatically.</p></div>",
+      });
+      if (error) return res.status(500).json({ error, keyPresent: true });
+      res.json({ ok: true, message: "Email sent — check michael@colonycityfinance.com" });
+    } catch(e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // AI chat proxy — frontend sends message history, server calls Perplexity and returns reply
+  const chatSchema = z.object({
+    messages: z.array(z.object({
+      role: z.enum(["user", "assistant"]),
+      content: z.string().max(4000),
+    })).max(50),
+  });
+
+  app.post("/api/chat", async (req, res) => {
+    try {
+      const { messages } = chatSchema.parse(req.body);
+      const client = getClient();
+      const completion = await client.chat.completions.create({
+        model: "sonar",
+        max_tokens: 512,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          ...messages,
+        ],
+      });
+      const reply = completion.choices[0]?.message?.content ?? "";
+      res.json({ reply });
+    } catch (err: any) {
+      console.error("Chat error:", err?.message);
+      res.status(500).json({ error: "Chat unavailable" });
+    }
+  });
+
+  // Get conversation history for a session
+  app.get("/api/history/:sessionId", (req, res) => {
+    try {
+      const messages = storage.getMessagesBySession(req.params.sessionId);
+      res.json(messages);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch history" });
+    }
+  });
+
+  // Save a conversation turn
+  app.post("/api/turn", async (req, res) => {
+    try {
+      const { sessionId, userMessage, assistantMessage } = saveTurnSchema.parse(req.body);
+      const now = new Date().toISOString();
+      storage.createMessage({ sessionId, role: "user", content: userMessage, createdAt: now });
+      storage.createMessage({ sessionId, role: "assistant", content: assistantMessage, createdAt: now });
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save turn" });
+    }
+  });
+
+  // Save a completed lead and send email notification
+  app.post("/api/save-lead", async (req, res) => {
+    try {
+      const data = saveLeadSchema.parse(req.body);
+      const lead = storage.createLead({
+        name: data.name,
+        phone: data.phone,
+        loanAmount: data.loanAmount,
+        creditScore: data.creditScore,
+        employmentStatus: data.employmentStatus,
+        monthlyIncome: data.monthlyIncome,
+        qualificationScore: data.qualificationScore,
+        summary: `${data.name} seeking ${data.loanAmount}. Credit: ${data.creditScore}. Employment: ${data.employmentStatus}. Income: ${data.monthlyIncome}/mo.`,
+        createdAt: new Date().toISOString(),
+      });
+      // Fire notification email (non-blocking)
+      sendLeadNotification(data).catch(err => console.error("Email notification failed:", err?.message));
+
+      // Fire outbound callback call + SMS (non-blocking)
+      const appBaseUrl = `${req.protocol}://${req.get("host")}`;
+      const rawPhone = data.phone.replace(/[^\d+]/g, "");
+      const e164Phone = rawPhone.startsWith("+") ? rawPhone : `+1${rawPhone}`;
+      makeCallbackCall(e164Phone, appBaseUrl).catch(err => console.error("Callback call failed:", err?.message));
+      sendCallbackSMS(e164Phone).catch(err => console.error("Callback SMS failed:", err?.message));
+
+      res.json({ ok: true, id: lead.id });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to save lead" });
+    }
+  });
+
+  // Reset session
+  app.delete("/api/history/:sessionId", async (req, res) => {
+    try {
+      storage.deleteMessagesBySession(req.params.sessionId);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to reset session" });
+    }
+  });
+
+  // Admin auth check (rate-limited to 5 attempts per IP per 15 min)
+  app.post("/api/admin/login", (req, res) => {
+    const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
+    if (!checkLoginRateLimit(ip)) {
+      return res.status(429).json({ error: "Too many attempts — try again in 15 minutes" });
+    }
+    let adminPw: string;
+    try { adminPw = getAdminPassword(); } catch { return res.status(500).json({ error: "Server misconfigured" }); }
+    const { password } = req.body ?? {};
+    if (password === adminPw) {
+      res.json({ ok: true });
+    } else {
+      res.status(401).json({ error: "Invalid password" });
+    }
+  });
+
+  // Get all leads (admin only)
+  app.get("/api/leads", async (req, res) => {
+    const auth = req.headers["x-admin-password"];
+    if (auth !== getAdminPassword()) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    try {
+      const leads = storage.getLeads();
+      res.json(leads);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch leads" });
+    }
+  });
+}

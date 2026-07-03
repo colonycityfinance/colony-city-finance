@@ -1,0 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Colony City Finance — Deep Navy / Gold fintech palette */
+@layer base {
+  :root {
+    /* Core surfaces — deep navy tones */
+    --background: 222 47% 11%;         /* deep navy bg */
+    --foreground: 210 40% 95%;
+
+    --card: 222 44% 14%;
+    --card-foreground: 210 40% 95%;
+
+    --popover: 222 44% 14%;
+    --popover-foreground: 210 40% 95%;
+
+    /* Primary — warm gold accent */
+    --primary: 43 96% 56%;
+    --primary-foreground: 222 47% 11%;
+
+    /* Secondary */
+    --secondary: 222 38% 20%;
+    --secondary-foreground: 210 40% 90%;
+
+    --muted: 222 38% 18%;
+    --muted-foreground: 215 20% 55%;
+
+    --accent: 43 96% 56%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 222 38% 22%;
+    --input: 222 38% 18%;
+    --ring: 43 96% 56%;
+
+    --radius: 0.75rem;
+
+    /* Chat specific */
+    --chat-user-bg: 43 96% 56%;
+    --chat-user-fg: 222 47% 11%;
+    --chat-bot-bg: 222 38% 20%;
+    --chat-bot-fg: 210 40% 95%;
+  }
+
+  /* Dark mode: same (already dark by design — light variation below) */
+  .light {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 222 72% 35%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 94%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 94%;
+    --muted-foreground: 215 20% 45%;
+    --accent: 43 96% 48%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 88%;
+    --input: 214 32% 91%;
+    --ring: 222 72% 35%;
+    --chat-user-bg: 222 72% 35%;
+    --chat-user-fg: 210 40% 98%;
+    --chat-bot-bg: 210 40% 94%;
+    --chat-bot-fg: 222 47% 11%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', 'DM Sans', system-ui, sans-serif;
+    min-height: 100dvh;
+  }
+}
+
+/* Chat bubbles */
+.bubble-bot {
+  background: hsl(var(--chat-bot-bg));
+  color: hsl(var(--chat-bot-fg));
+  border-radius: 1rem 1rem 1rem 0.25rem;
+}
+
+.bubble-user {
+  background: hsl(var(--chat-user-bg));
+  color: hsl(var(--chat-user-fg));
+  border-radius: 1rem 1rem 0.25rem 1rem;
+}
+
+/* Typing dots */
+.typing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: hsl(var(--muted-foreground));
+  animation: typing 1.4s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
+/* Score badges */
+.score-hot { @apply bg-green-500/20 text-green-400 border border-green-500/30; }
+.score-warm { @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/30; }
+.score-cold { @apply bg-blue-500/20 text-blue-400 border border-blue-500/30; }
+
+/* Smooth chat scroll */
+.chat-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
