@@ -51,15 +51,8 @@ async function buildAll() {
     bundle: true,
     format: "cjs",
     outfile: "dist/index.cjs",
-    define: {
-      "process.env.NODE_ENV": '"production"',
-      "process.env.ADMIN_PASSWORD": '"colonyfinance2026"',
-      "process.env.TWILIO_ACCOUNT_SID": '"ACdc7f2d2d72c9b5067e72e4265e9e0379"',
-      "process.env.TWILIO_AUTH_TOKEN": '"fe74d085552de5e41501ba1b80c81f4f"',
-      "process.env.TWILIO_FROM_NUMBER": '"+12294595317"',
-      "process.env.PPLX_API_KEY": '"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"',
-      "process.env.RESEND_API_KEY": '"re_YDb8ZmEv_JEQ6KaabhAJCE2fM3itrwaRo"',
-    },
+    // No hardcoded credentials — all secrets come from environment variables at runtime
+    define: {},
     minify: false,
     external: externals,
     logLevel: "info",
