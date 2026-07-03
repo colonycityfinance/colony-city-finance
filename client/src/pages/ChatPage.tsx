@@ -57,9 +57,7 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  const API_BASE = window.location.hostname.endsWith(".pplx.app")
-    ? `${window.location.origin}/port/5000`
-    : "";
+  const API_BASE = "https://colony-city-finance.onrender.com";
 
   const callPerplexityAPI = async (history: ChatMessage[]): Promise<string> => {
     // Retry up to 3 times with a short delay — handles sandbox cold-start

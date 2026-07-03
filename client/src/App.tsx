@@ -9,9 +9,7 @@ import NotFound from "./pages/not-found";
 import { useEffect } from "react";
 
 // Keep the backend sandbox warm so users never hit a cold-start error
-const API_PING_BASE = window.location.hostname.endsWith(".pplx.app")
-  ? `${window.location.origin}/port/5000`
-  : "";
+const API_PING_BASE = "https://colony-city-finance.onrender.com";
 
 function KeepAlive() {
   useEffect(() => {

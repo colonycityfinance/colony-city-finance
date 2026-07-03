@@ -13,8 +13,26 @@ import { serveStatic } from "./static";
 import { createServer } from "node:http";
 
 const app = express();
-app.set('trust proxy', 1); // Required behind Cloudflare/pplx.app proxy for rate limiting
+app.set('trust proxy', 1);
 const httpServer = createServer(app);
+
+// CORS — allow requests from the pplx.app frontend
+app.use((req, res, next) => {
+  const allowed = [
+    "https://colony-city-finance-inc.pplx.app",
+    "http://localhost:5000",
+    "http://localhost:3000",
+  ];
+  const origin = req.headers.origin || "";
+  if (allowed.includes(origin) || origin.endsWith(".pplx.app")) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization,x-admin-password");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 
 declare module "http" {
   interface IncomingMessage {

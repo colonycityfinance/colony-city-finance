@@ -1,10 +1,7 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-// In the pplx.app published sandbox, the backend runs on port 5000 behind a /port/5000 proxy path.
-// In local dev the backend is on the same origin (port 5000 via Vite proxy), so no prefix needed.
-const API_BASE = window.location.hostname.endsWith(".pplx.app")
-  ? `${window.location.origin}/port/5000`
-  : "";
+// Backend is hosted on Render for always-on reliability
+const API_BASE = "https://colony-city-finance.onrender.com";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
