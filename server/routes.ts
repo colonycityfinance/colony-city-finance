@@ -337,7 +337,7 @@ async function sendConsentFormEmail(data: {
     const safeName = data.fullName.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
     emailPayload.attachments = [{
       filename: `Consent_Form_${safeName}.pdf`,
-      content: pdfBuffer,
+      content: pdfBuffer.toString('base64'),
     }];
   }
 
