@@ -43,7 +43,7 @@ async function sendCallbackSMS(toPhone: string) {
     const message = await client.messages.create({
       to: toPhone,
       from: TWILIO_FROM_NUMBER,
-      body: `Hi! Thank you for pre-qualifying with Colony City Finance. Your pre-qualification looks great! 🎉\n\nTo speed up your process, please have the following ready:\n• Social Security card\n• Proof of income\n• Valid Georgia ID\n\nYou can email documents to michael@colonycityfinance.com\n\nA loan advisor will be calling you shortly!`,
+      body: `Thank you for pre-qualifying with Colony City Finance! Your pre-qualification looks great and we are so excited to work with you!\n\nA loan advisor will be with you shortly. In the meantime, please have the following ready:\n• Social Security card\n• Proof of income\n• Valid Georgia ID\n\nWant to get a head start? Email your documents to:\nmichael@colonycityfinance.com\n\nThank you for choosing Colony City Finance — an advisor will be reaching out to you very soon!`,
     });
     console.log(`SMS sent: ${message.sid} to ${toPhone}`);
     return message.sid;
