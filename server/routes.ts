@@ -6,6 +6,7 @@ import OpenAI from "openai";
 import { Resend } from "resend";
 import twilio from "twilio";
 import multer from "multer";
+import PDFDocument from "pdfkit";
 
 // ADMIN_PASSWORD must be set via env — no hardcoded fallback
 function getAdminPassword() {
@@ -174,6 +175,98 @@ async function sendLeadNotification(lead: {
   }
 }
 
+function generateConsentPDF(data: {
+  fullName: string; dob: string; ssn: string; address: string;
+  city: string; state: string; zip: string; phone: string;
+  email: string; loanAmount: string; signatureName: string; signatureDate: string;
+}): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 56, size: 'LETTER' });
+    const chunks: Buffer[] = [];
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const gold = '#b45309';
+    const dark = '#1e293b';
+    const mid  = '#475569';
+    const W = doc.page.width - 112;
+
+    // Header bar
+    doc.rect(56, 40, W, 48).fill(dark);
+    doc.fillColor('#f59e0b').font('Helvetica-Bold').fontSize(15)
+       .text('Colony City Finance', 72, 53, { width: W - 32 });
+    doc.fillColor('#94a3b8').font('Helvetica').fontSize(9)
+       .text('FCRA Credit Pull Authorization & Consent Form', 72, 72, { width: W - 32 });
+
+    doc.moveDown(3);
+
+    // Section helper
+    const section = (title: string) => {
+      doc.moveDown(0.6);
+      doc.fillColor(gold).font('Helvetica-Bold').fontSize(8)
+         .text(title.toUpperCase(), { characterSpacing: 1 });
+      doc.moveTo(56, doc.y + 2).lineTo(56 + W, doc.y + 2).strokeColor('#e2e8f0').lineWidth(0.5).stroke();
+      doc.moveDown(0.5);
+    };
+
+    // Row helper
+    const row = (label: string, value: string) => {
+      const y = doc.y;
+      doc.fillColor(mid).font('Helvetica').fontSize(9).text(label, 56, y, { width: 160 });
+      doc.fillColor(dark).font('Helvetica').fontSize(9).text(value || '—', 220, y, { width: W - 164 });
+      doc.moveDown(0.55);
+    };
+
+    // Applicant info
+    section('Applicant Information');
+    row('Full Legal Name', data.fullName);
+    row('Date of Birth', data.dob || '—');
+    row('Social Security Number', data.ssn || '—');
+    row('Address', [data.address, data.city, data.state, data.zip].filter(Boolean).join(', ') || '—');
+    row('Phone', data.phone || '—');
+    row('Email', data.email || '—');
+    row('Requested Loan Amount', data.loanAmount || '—');
+
+    // Authorization text
+    section('Authorization & Consent');
+    const authText = [
+      `I, the undersigned applicant, hereby authorize Colony City Finance and its agents, employees, or affiliates, to obtain a consumer credit report and/or any other investigative report from one or more consumer reporting agencies in connection with my application for a loan or extension of credit.`,
+      `I understand and acknowledge that this authorization is made pursuant to the Fair Credit Reporting Act (FCRA), 15 U.S.C. § 1681 et seq., and that Colony City Finance will use this report solely to evaluate my creditworthiness for the purpose of the loan transaction described above.`,
+      `I further authorize Colony City Finance to verify any information provided in my application, including employment, income, and identity, through any lawful means. I certify that all information provided is true and accurate to the best of my knowledge.`,
+      `I understand I have rights under the FCRA, including the right to receive a copy of any consumer report obtained, and to dispute inaccurate information contained therein.`,
+      `This consent shall remain in effect for 90 days from the date signed below, or until my loan application is withdrawn or completed, whichever occurs first.`,
+    ];
+    authText.forEach(p => {
+      doc.fillColor('#334155').font('Helvetica').fontSize(9).text(p, { width: W, align: 'justify' });
+      doc.moveDown(0.5);
+    });
+
+    // Signature
+    section('Electronic Signature');
+    doc.moveDown(0.3);
+    // Signature name in italic
+    doc.fillColor('#1e3a8a').font('Helvetica-Oblique').fontSize(22)
+       .text(data.signatureName || '', 56, doc.y, { width: W });
+    doc.moveDown(0.3);
+    doc.moveTo(56, doc.y).lineTo(260, doc.y).strokeColor('#1e3a8a').lineWidth(1).stroke();
+    doc.moveDown(0.6);
+    doc.fillColor(mid).font('Helvetica').fontSize(9)
+       .text(`Signed electronically on ${data.signatureDate || new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`, 56);
+    doc.moveDown(0.3);
+    doc.fillColor(mid).font('Helvetica').fontSize(8)
+       .text('By submitting this form, the applicant authorized Colony City Finance to obtain a consumer credit report pursuant to the FCRA, 15 U.S.C. § 1681 et seq. This electronic signature is legally binding.', 56, doc.y, { width: W });
+
+    // Footer
+    const pageH = doc.page.height;
+    doc.rect(56, pageH - 52, W, 28).fill('#f8fafc');
+    doc.fillColor(mid).font('Helvetica').fontSize(7.5)
+       .text('Colony City Finance  ·  This document is protected under the Fair Credit Reporting Act (FCRA). Unauthorized use is prohibited.', 64, pageH - 44, { width: W - 16, align: 'center' });
+
+    doc.end();
+  });
+}
+
 async function sendConsentFormEmail(data: {
   fullName: string;
   dob: string;
@@ -194,14 +287,23 @@ async function sendConsentFormEmail(data: {
     return;
   }
   const resend = new Resend(resendKey);
-  const { error } = await resend.emails.send({
+
+  // Generate signed PDF
+  let pdfBuffer: Buffer | null = null;
+  try {
+    pdfBuffer = await generateConsentPDF(data);
+  } catch (pdfErr: any) {
+    console.error("PDF generation failed:", pdfErr?.message);
+  }
+
+  const emailPayload: any = {
     from: "Colony City Finance Leads <onboarding@resend.dev>",
     to: "michael@colonycityfinance.com",
     subject: `📋 Consent Form Submitted — ${data.fullName}`,
     html: `
       <div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0f172a;color:#f1f5f9;padding:32px;border-radius:12px">
         <h2 style="color:#f59e0b;margin:0 0 6px">Credit Pull Authorization Received</h2>
-        <p style="color:#94a3b8;margin:0 0 24px;font-size:14px">A customer has completed and submitted their FCRA consent form.</p>
+        <p style="color:#94a3b8;margin:0 0 24px;font-size:14px">A customer has completed and submitted their FCRA consent form. The signed PDF is attached.</p>
 
         <h3 style="color:#e2e8f0;font-size:13px;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 12px">Applicant Details</h3>
         <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
@@ -229,7 +331,17 @@ async function sendConsentFormEmail(data: {
         </div>
       </div>
     `,
-  });
+  };
+
+  if (pdfBuffer) {
+    const safeName = data.fullName.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '_');
+    emailPayload.attachments = [{
+      filename: `Consent_Form_${safeName}.pdf`,
+      content: pdfBuffer,
+    }];
+  }
+
+  const { error } = await resend.emails.send(emailPayload);
   if (error) {
     console.error("Consent form email error:", JSON.stringify(error));
   } else {
