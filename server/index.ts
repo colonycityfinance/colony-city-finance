@@ -20,11 +20,13 @@ const httpServer = createServer(app);
 app.use((req, res, next) => {
   const allowed = [
     "https://colony-city-finance-inc.pplx.app",
+    "https://www.perplexity.ai",
+    "https://perplexity.ai",
     "http://localhost:5000",
     "http://localhost:3000",
   ];
   const origin = req.headers.origin || "";
-  if (allowed.includes(origin) || origin.endsWith(".pplx.app")) {
+  if (allowed.includes(origin) || origin.endsWith(".pplx.app") || origin.endsWith(".perplexity.ai")) {
     res.setHeader("Access-Control-Allow-Origin", origin);
   }
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
