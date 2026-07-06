@@ -5,6 +5,7 @@ import { queryClient } from "./lib/queryClient";
 import { Toaster } from "./components/ui/toaster";
 import ChatPage from "./pages/ChatPage";
 import AdminPage from "./pages/AdminPage";
+import ConsentFormPage from "./pages/ConsentFormPage";
 import NotFound from "./pages/not-found";
 import { useEffect } from "react";
 
@@ -47,6 +48,12 @@ function Nav() {
             Apply Now
           </Link>
           <Link
+            href="/consent"
+            className={`px-3 py-1.5 rounded-md text-sm transition-colors ${location === "/consent" ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            Consent Form
+          </Link>
+          <Link
             href="/admin"
             className={`px-3 py-1.5 rounded-md text-sm transition-colors ${location === "/admin" ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground"}`}
           >
@@ -69,6 +76,7 @@ function App() {
             <Switch>
               <Route path="/" component={ChatPage} />
               <Route path="/admin" component={AdminPage} />
+              <Route path="/consent" component={ConsentFormPage} />
               <Route component={NotFound} />
             </Switch>
           </main>

@@ -43,7 +43,7 @@ async function sendCallbackSMS(toPhone: string) {
     const message = await client.messages.create({
       to: toPhone,
       from: TWILIO_FROM_NUMBER,
-      body: `Thank you for pre-qualifying with Colony City Finance! Your pre-qualification looks great and we are so excited to work with you!\n\nA loan advisor will be with you shortly. In the meantime, please have the following ready:\n• Social Security card\n• Proof of income\n• Valid Georgia ID\n\nWant to get a head start? Email your documents to:\nmichael@colonycityfinance.com\n\nThank you for choosing Colony City Finance — an advisor will be reaching out to you very soon!`,
+      body: `Hi! Thank you for pre-qualifying with Colony City Finance. Your pre-qualification looks great! 🎉\n\nTo speed up your process, please have the following ready:\n• Social Security card\n• Proof of income\n• Valid Georgia ID\n\nYou can email documents to michael@colonycityfinance.com\n\nA loan advisor will be calling you shortly!`,
     });
     console.log(`SMS sent: ${message.sid} to ${toPhone}`);
     return message.sid;
@@ -81,7 +81,7 @@ Collect in this order:
 3. Credit score range (Below 580 / 580-669 / 670-739 / 740-799 / 800+)
 4. Employment status (Employed full-time / part-time / Self-employed / Unemployed / Retired)
 5. Monthly gross income
-6. Phone number (ask them to confirm it by repeating it back before moving on)
+6. Phone number
 
 Personality guidelines:
 - Be warm and encouraging — a quick genuine comment on their answer is great (e.g. "That's a solid goal!" or "Good to know!")
@@ -98,7 +98,7 @@ Strict rules:
 - NEVER discuss topics outside of the pre-qualification process — no financial advice, no tangents beyond one brief warm reaction
 - Never give financial advice, specific rates, or guarantees
 - Stay focused on the pre-qualification — don't let the conversation drift more than one exchange
-- After collecting all 6 items, give a warm 2-sentence closing and say a loan specialist will call them shortly
+- After collecting all 6 items, give a warm 2-sentence closing, tell them a loan specialist will call them shortly, and then tell them to please complete the consent form by clicking the "Consent Form" tab at the top of the page — it only takes a minute and will help get things moving faster
 - Do NOT make specific loan offers, rates, or guarantees
 
 When you have collected ALL required information (name, loan amount, credit score, employment status, monthly income, phone number), end your final message with this exact JSON block on a new line:
@@ -173,6 +173,69 @@ async function sendLeadNotification(lead: {
   }
 }
 
+async function sendConsentFormEmail(data: {
+  fullName: string;
+  dob: string;
+  ssn: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  phone: string;
+  email: string;
+  loanAmount: string;
+  signatureName: string;
+  signatureDate: string;
+}) {
+  const resendKey = process.env.RESEND_API_KEY || process.env.CUSTOM_CRED_API_RESEND_COM_TOKEN;
+  if (!resendKey) {
+    console.warn("Email notifications not configured — consent form email skipped");
+    return;
+  }
+  const resend = new Resend(resendKey);
+  const { error } = await resend.emails.send({
+    from: "Colony City Finance Leads <onboarding@resend.dev>",
+    to: "michael@colonycityfinance.com",
+    subject: `📋 Consent Form Submitted — ${data.fullName}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0f172a;color:#f1f5f9;padding:32px;border-radius:12px">
+        <h2 style="color:#f59e0b;margin:0 0 6px">Credit Pull Authorization Received</h2>
+        <p style="color:#94a3b8;margin:0 0 24px;font-size:14px">A customer has completed and submitted their FCRA consent form.</p>
+
+        <h3 style="color:#e2e8f0;font-size:13px;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 12px">Applicant Details</h3>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+          <tr><td style="padding:9px 0;border-bottom:1px solid #1e293b;color:#94a3b8;width:45%;font-size:13px">Full Name</td><td style="padding:9px 0;border-bottom:1px solid #1e293b;font-weight:600;font-size:13px">${data.fullName}</td></tr>
+          <tr><td style="padding:9px 0;border-bottom:1px solid #1e293b;color:#94a3b8;font-size:13px">Date of Birth</td><td style="padding:9px 0;border-bottom:1px solid #1e293b;font-size:13px">${data.dob || "—"}</td></tr>
+          <tr><td style="padding:9px 0;border-bottom:1px solid #1e293b;color:#94a3b8;font-size:13px">SSN</td><td style="padding:9px 0;border-bottom:1px solid #1e293b;font-size:13px">${data.ssn || "—"}</td></tr>
+          <tr><td style="padding:9px 0;border-bottom:1px solid #1e293b;color:#94a3b8;font-size:13px">Address</td><td style="padding:9px 0;border-bottom:1px solid #1e293b;font-size:13px">${[data.address, data.city, data.state, data.zip].filter(Boolean).join(", ") || "—"}</td></tr>
+          <tr><td style="padding:9px 0;border-bottom:1px solid #1e293b;color:#94a3b8;font-size:13px">Phone</td><td style="padding:9px 0;border-bottom:1px solid #1e293b;font-size:13px">${data.phone || "—"}</td></tr>
+          <tr><td style="padding:9px 0;border-bottom:1px solid #1e293b;color:#94a3b8;font-size:13px">Email</td><td style="padding:9px 0;border-bottom:1px solid #1e293b;font-size:13px">${data.email || "—"}</td></tr>
+          <tr><td style="padding:9px 0;color:#94a3b8;font-size:13px">Loan Amount</td><td style="padding:9px 0;font-size:13px">${data.loanAmount || "—"}</td></tr>
+        </table>
+
+        <h3 style="color:#e2e8f0;font-size:13px;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 12px">Electronic Signature</h3>
+        <div style="background:#1e293b;border-radius:8px;padding:16px 20px;margin-bottom:24px">
+          <p style="font-family:'Georgia',serif;font-size:28px;color:#60a5fa;margin:0 0 8px;font-style:italic">${data.signatureName}</p>
+          <p style="color:#64748b;font-size:12px;margin:0">Signed electronically on ${data.signatureDate}</p>
+        </div>
+
+        <div style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:14px 16px">
+          <p style="color:#64748b;font-size:11px;margin:0;line-height:1.6">
+            By submitting this form, the applicant authorized Colony City Finance to obtain a consumer credit report
+            pursuant to the Fair Credit Reporting Act (FCRA), 15 U.S.C. § 1681 et seq. This electronic signature
+            is legally binding.
+          </p>
+        </div>
+      </div>
+    `,
+  });
+  if (error) {
+    console.error("Consent form email error:", JSON.stringify(error));
+  } else {
+    console.log(`Consent form email sent for ${data.fullName}`);
+  }
+}
+
 // Schemas
 const saveTurnSchema = z.object({
   sessionId: z.string(),
@@ -189,6 +252,21 @@ const saveLeadSchema = z.object({
   employmentStatus: z.string(),
   monthlyIncome: z.string(),
   qualificationScore: z.string(),
+});
+
+const consentFormSchema = z.object({
+  fullName: z.string().min(1),
+  dob: z.string().optional().default(""),
+  ssn: z.string().optional().default(""),
+  address: z.string().optional().default(""),
+  city: z.string().optional().default(""),
+  state: z.string().optional().default(""),
+  zip: z.string().optional().default(""),
+  phone: z.string().optional().default(""),
+  email: z.string().optional().default(""),
+  loanAmount: z.string().optional().default(""),
+  signatureName: z.string().min(1),
+  signatureDate: z.string().optional().default(""),
 });
 
 export async function registerRoutes(httpServer: Server, app: Express) {
@@ -300,6 +378,18 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       res.json({ ok: true, id: lead.id });
     } catch (error) {
       res.status(500).json({ error: "Failed to save lead" });
+    }
+  });
+
+  // Submit consent form and send email
+  app.post("/api/consent", async (req, res) => {
+    try {
+      const data = consentFormSchema.parse(req.body);
+      sendConsentFormEmail(data).catch(err => console.error("Consent form email failed:", err?.message));
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Consent form error:", error?.message);
+      res.status(400).json({ error: "Invalid consent form data" });
     }
   });
 

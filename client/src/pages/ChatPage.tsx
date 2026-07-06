@@ -4,7 +4,8 @@ import { apiRequest } from "@/lib/queryClient";
 import DOMPurify from "dompurify";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Send, RotateCcw, Phone, CheckCircle2, ShieldCheck } from "lucide-react";
+import { Send, RotateCcw, Phone, CheckCircle2, ShieldCheck, FileText } from "lucide-react";
+import { Link } from "wouter";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -264,15 +265,23 @@ export default function ChatPage() {
         )}
 
         {isComplete && (
-          <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 flex items-start gap-3">
-            <CheckCircle2 className="text-green-400 mt-0.5 shrink-0" size={18} />
-            <div>
-              <p className="text-sm font-semibold text-green-400">You're all set!</p>
-              <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                <Phone size={11} />
-                A loan specialist will call you shortly to discuss your options.
-              </p>
+          <div className="space-y-3">
+            <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 flex items-start gap-3">
+              <CheckCircle2 className="text-green-400 mt-0.5 shrink-0" size={18} />
+              <div>
+                <p className="text-sm font-semibold text-green-400">You're pre-qualified!</p>
+                <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                  <Phone size={11} />
+                  A loan specialist will call you shortly to discuss your options.
+                </p>
+              </div>
             </div>
+            <Link href="/consent">
+              <button className="w-full flex items-center justify-center gap-2 bg-primary text-primary-foreground font-semibold text-sm py-3 px-4 rounded-xl hover:bg-primary/90 transition-colors shadow-md">
+                <FileText size={15} />
+                Complete Your Consent Form →
+              </button>
+            </Link>
           </div>
         )}
 
