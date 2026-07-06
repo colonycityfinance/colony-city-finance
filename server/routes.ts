@@ -5,6 +5,7 @@ import { z } from "zod";
 import OpenAI from "openai";
 import { Resend } from "resend";
 import twilio from "twilio";
+import multer from "multer";
 
 // ADMIN_PASSWORD must be set via env — no hardcoded fallback
 function getAdminPassword() {
@@ -98,7 +99,7 @@ Strict rules:
 - NEVER discuss topics outside of the pre-qualification process — no financial advice, no tangents beyond one brief warm reaction
 - Never give financial advice, specific rates, or guarantees
 - Stay focused on the pre-qualification — don't let the conversation drift more than one exchange
-- After collecting all 6 items, give a warm 2-sentence closing, tell them a loan specialist will call them shortly, and then tell them to please complete the consent form by clicking the "Consent Form" tab at the top of the page — it only takes a minute and will help get things moving faster
+- After collecting all 6 items, give a warm 2-sentence closing, tell them a loan specialist will call them shortly, and then tell them the next steps: (1) complete the Consent Form by clicking the "Consent Form" tab at the top, and (2) upload their ID and proof of income by clicking the "Documents" tab — both only take a minute and will help get things moving faster
 - Do NOT make specific loan offers, rates, or guarantees
 
 When you have collected ALL required information (name, loan amount, credit score, employment status, monthly income, phone number), end your final message with this exact JSON block on a new line:
@@ -236,6 +237,50 @@ async function sendConsentFormEmail(data: {
   }
 }
 
+async function sendDocumentEmail(fields: { name: string; phone: string }, files: { fieldname: string; originalname: string; mimetype: string; buffer: Buffer }[]) {
+  const resendKey = process.env.RESEND_API_KEY || process.env.CUSTOM_CRED_API_RESEND_COM_TOKEN;
+  if (!resendKey) {
+    console.warn("Email notifications not configured — document email skipped");
+    return;
+  }
+  const resend = new Resend(resendKey);
+
+  const attachments = files.map(f => ({
+    filename: f.originalname,
+    content: f.buffer,
+  }));
+
+  const fileList = files.map(f => {
+    const label = f.fieldname === 'idDocument' ? 'Government-Issued ID' : 'Proof of Income';
+    return `<tr><td style="padding:9px 0;border-bottom:1px solid #1e293b;color:#94a3b8;font-size:13px;width:45%">${label}</td><td style="padding:9px 0;border-bottom:1px solid #1e293b;font-size:13px">${f.originalname}</td></tr>`;
+  }).join('');
+
+  const { error } = await resend.emails.send({
+    from: "Colony City Finance Leads <onboarding@resend.dev>",
+    to: "michael@colonycityfinance.com",
+    subject: `📎 Documents Submitted — ${fields.name}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:560px;margin:0 auto;background:#0f172a;color:#f1f5f9;padding:32px;border-radius:12px">
+        <h2 style="color:#f59e0b;margin:0 0 6px">Documents Received</h2>
+        <p style="color:#94a3b8;margin:0 0 24px;font-size:14px">A customer has uploaded their verification documents.</p>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+          <tr><td style="padding:9px 0;border-bottom:1px solid #1e293b;color:#94a3b8;font-size:13px;width:45%">Name</td><td style="padding:9px 0;border-bottom:1px solid #1e293b;font-weight:600;font-size:13px">${fields.name}</td></tr>
+          <tr><td style="padding:9px 0;border-bottom:1px solid #1e293b;color:#94a3b8;font-size:13px">Phone</td><td style="padding:9px 0;border-bottom:1px solid #1e293b;font-size:13px">${fields.phone}</td></tr>
+          ${fileList}
+        </table>
+        <p style="color:#64748b;font-size:12px;margin:0">Documents are attached to this email.</p>
+      </div>
+    `,
+    attachments,
+  });
+
+  if (error) {
+    console.error("Document email error:", JSON.stringify(error));
+  } else {
+    console.log(`Document email sent for ${fields.name}`);
+  }
+}
+
 // Schemas
 const saveTurnSchema = z.object({
   sessionId: z.string(),
@@ -267,6 +312,15 @@ const consentFormSchema = z.object({
   loanAmount: z.string().optional().default(""),
   signatureName: z.string().min(1),
   signatureDate: z.string().optional().default(""),
+});
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per file
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    cb(null, allowed.includes(file.mimetype));
+  },
 });
 
 export async function registerRoutes(httpServer: Server, app: Express) {
@@ -378,6 +432,26 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       res.json({ ok: true, id: lead.id });
     } catch (error) {
       res.status(500).json({ error: "Failed to save lead" });
+    }
+  });
+
+  // Upload documents and email them
+  app.post("/api/upload", upload.fields([{ name: 'idDocument', maxCount: 1 }, { name: 'incomeDocument', maxCount: 1 }]), async (req, res) => {
+    try {
+      const name = (req.body.name || "").trim();
+      const phone = (req.body.phone || "").trim();
+      if (!name) return res.status(400).json({ error: "Name is required" });
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      const fileList = [
+        ...(files['idDocument'] || []),
+        ...(files['incomeDocument'] || []),
+      ];
+      if (fileList.length === 0) return res.status(400).json({ error: "At least one document is required" });
+      sendDocumentEmail({ name, phone }, fileList).catch(err => console.error("Document email failed:", err?.message));
+      res.json({ ok: true });
+    } catch (error: any) {
+      console.error("Upload error:", error?.message);
+      res.status(500).json({ error: "Upload failed" });
     }
   });
 
