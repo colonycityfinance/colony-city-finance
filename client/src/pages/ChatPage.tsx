@@ -182,7 +182,7 @@ export default function ChatPage() {
           </h1>
 
           <p className="text-muted-foreground text-base leading-relaxed">
-            Chat with Steph, our AI loan advisor. Answer a few quick questions and a specialist will call you with your personal loan options — tailored to your situation.
+            Chat with Annie, our AI loan advisor. Answer a few quick questions and a specialist will call you with your personal loan options — tailored to your situation.
           </p>
 
           <Button
@@ -222,7 +222,7 @@ export default function ChatPage() {
             <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-background" />
           </div>
           <div>
-            <p className="font-semibold text-sm">Steph — Loan Advisor</p>
+            <p className="font-semibold text-sm">Annie — Loan Advisor</p>
             <p className="text-xs text-muted-foreground">Colony City Finance • Online now</p>
           </div>
         </div>
