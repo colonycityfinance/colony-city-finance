@@ -96,9 +96,9 @@ Strict rules:
 - Ask ONE question per message
 - Be flexible with answers — if someone gives a reasonable, natural-language answer that contains the info you need, accept it and move on. Do NOT require them to use exact wording or pick from a list.
 - Examples of acceptable answers: "I make about 3 grand a month" (monthly income), "I work full time at a warehouse" (employed full-time), "somewhere around 650" (credit score range 580-669), "my number is 229-555-1234" (phone number)
-- If the answer is unclear, a single word, gibberish, or off-topic: do NOT search the internet or explain what the word means. Simply say "Got it! Let me keep us on track —" and re-ask the current question.
-- NEVER look up, define, or research anything the customer types. Only collect their answers to the 6 questions.
-- If someone types a random word or name, treat it as their answer and move on. Do not analyze it.
+- If the answer is unclear or off-topic: give a brief warm reaction (one sentence max), then gently steer back with the current question. Never look up or define what the customer typed.
+- If someone types a partial or unusual name like "Mikr" or "Dee" — just accept it warmly as their name and move on. Do NOT research it.
+- NEVER search the internet, define words, or explain what something means. You are a loan advisor, not a search engine.
 - NEVER discuss topics outside of the pre-qualification process — no financial advice, no tangents beyond one brief warm reaction
 - Never give financial advice, specific rates, or guarantees
 - Stay focused on the pre-qualification — don't let the conversation drift more than one exchange
@@ -492,19 +492,20 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const raw = completion.choices[0]?.message?.content ?? "";
       let reply = raw.replace(/\[\d+\]/g, "").replace(/\s{2,}/g, " ").trim();
 
-      // Guardrail: if the reply is suspiciously long (web search rambling)
-      // or contains off-topic keywords, replace with a redirect
+      // Guardrail: only block obvious web-search rambling — specific off-topic brand/site names
+      // Do NOT block based on length alone — that kills her personality
       const offTopicSignals = [
         /MikroTik/i, /Bloomberg/i, /Yahoo Finance/i, /stock ticker/i,
-        /Wikipedia/i, /according to/i, /search results/i, /Hugging Face/i,
-        /LED lighting/i, /networking equipment/i
+        /Wikipedia/i, /search results/i, /Hugging Face/i,
+        /LED lighting/i, /networking equipment/i, /according to (?:the |our )?(?:search|web|internet|results)/i,
+        /\bISP\b/, /router/i, /recessed LED/i, /Lumenwerx/i
       ];
-      const isOffTopic = offTopicSignals.some(r => r.test(reply)) || reply.length > 600;
+      const isOffTopic = offTopicSignals.some(r => r.test(reply));
       if (isOffTopic) {
         // Figure out which question we're on based on message history
         const count = messages.filter((m: {role: string}) => m.role === "assistant").length;
         const redirects = [
-          "Sorry about that! What's your first name?",
+          "Ha, let me keep us moving! What's your first name?",
           "Let me stay on track! What loan amount are you looking for?",
           "Let me get back on track! What's your credit score range? (Below 580, 580-669, 670-739, 740-799, or 800+)",
           "Let's keep moving! What's your employment status? (Employed full-time, part-time, self-employed, unemployed, or retired)",
