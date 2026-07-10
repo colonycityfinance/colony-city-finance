@@ -96,7 +96,9 @@ Strict rules:
 - Ask ONE question per message
 - Be flexible with answers — if someone gives a reasonable, natural-language answer that contains the info you need, accept it and move on. Do NOT require them to use exact wording or pick from a list.
 - Examples of acceptable answers: "I make about 3 grand a month" (monthly income), "I work full time at a warehouse" (employed full-time), "somewhere around 650" (credit score range 580-669), "my number is 229-555-1234" (phone number)
-- Only re-ask if the answer is genuinely unrelated or completely unclear — for example, if someone responds with a joke, a question back to you, or something totally off-topic. In that case, gently redirect: "Ha, let me keep us moving — [re-ask the same question]?"
+- If the answer is unclear, a single word, gibberish, or off-topic: do NOT search the internet or explain what the word means. Simply say "Got it! Let me keep us on track —" and re-ask the current question.
+- NEVER look up, define, or research anything the customer types. Only collect their answers to the 6 questions.
+- If someone types a random word or name, treat it as their answer and move on. Do not analyze it.
 - NEVER discuss topics outside of the pre-qualification process — no financial advice, no tangents beyond one brief warm reaction
 - Never give financial advice, specific rates, or guarantees
 - Stay focused on the pre-qualification — don't let the conversation drift more than one exchange
@@ -488,7 +490,30 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       });
       // Strip citation markers [1], [2], [3] etc. that Perplexity adds
       const raw = completion.choices[0]?.message?.content ?? "";
-      const reply = raw.replace(/\[\d+\]/g, "").replace(/\s{2,}/g, " ").trim();
+      let reply = raw.replace(/\[\d+\]/g, "").replace(/\s{2,}/g, " ").trim();
+
+      // Guardrail: if the reply is suspiciously long (web search rambling)
+      // or contains off-topic keywords, replace with a redirect
+      const offTopicSignals = [
+        /MikroTik/i, /Bloomberg/i, /Yahoo Finance/i, /stock ticker/i,
+        /Wikipedia/i, /according to/i, /search results/i, /Hugging Face/i,
+        /LED lighting/i, /networking equipment/i
+      ];
+      const isOffTopic = offTopicSignals.some(r => r.test(reply)) || reply.length > 600;
+      if (isOffTopic) {
+        // Figure out which question we're on based on message history
+        const count = messages.filter((m: {role: string}) => m.role === "assistant").length;
+        const redirects = [
+          "Sorry about that! What's your first name?",
+          "Let me stay on track! What loan amount are you looking for?",
+          "Let me get back on track! What's your credit score range? (Below 580, 580-669, 670-739, 740-799, or 800+)",
+          "Let's keep moving! What's your employment status? (Employed full-time, part-time, self-employed, unemployed, or retired)",
+          "Almost there! What's your approximate monthly gross income?",
+          "One last thing! What's the best phone number for a specialist to reach you?",
+        ];
+        reply = redirects[Math.min(count, redirects.length - 1)];
+      }
+
       res.json({ reply });
     } catch (err: any) {
       console.error("Chat error:", err?.message);
