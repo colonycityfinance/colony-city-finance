@@ -479,14 +479,16 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const { messages } = chatSchema.parse(req.body);
       const client = getClient();
       const completion = await client.chat.completions.create({
-        model: "r-plus",
+        model: "sonar",
         max_tokens: 512,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           ...messages,
         ],
       });
-      const reply = completion.choices[0]?.message?.content ?? "";
+      // Strip citation markers [1], [2], [3] etc. that Perplexity adds
+      const raw = completion.choices[0]?.message?.content ?? "";
+      const reply = raw.replace(/\[\d+\]/g, "").replace(/\s{2,}/g, " ").trim();
       res.json({ reply });
     } catch (err: any) {
       console.error("Chat error:", err?.message);
