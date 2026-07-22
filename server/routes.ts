@@ -492,15 +492,30 @@ export async function registerRoutes(httpServer: Server, app: Express) {
       const raw = completion.choices[0]?.message?.content ?? "";
       let reply = raw.replace(/\[\d+\]/g, "").replace(/\s{2,}/g, " ").trim();
 
-      // Guardrail: only block obvious web-search rambling — specific off-topic brand/site names
-      // Do NOT block based on length alone — that kills her personality
+      // Guardrail layer 1: known off-topic brand/site names (kept as a fast-path backstop)
       const offTopicSignals = [
         /MikroTik/i, /Bloomberg/i, /Yahoo Finance/i, /stock ticker/i,
         /Wikipedia/i, /search results/i, /Hugging Face/i,
         /LED lighting/i, /networking equipment/i, /according to (?:the |our )?(?:search|web|internet|results)/i,
         /\bISP\b/, /router/i, /recessed LED/i, /Lumenwerx/i
       ];
-      const isOffTopic = offTopicSignals.some(r => r.test(reply));
+      const keywordMatch = offTopicSignals.some(r => r.test(reply));
+
+      // Guardrail layer 2: structural check. Every in-flow reply from Annie should end by
+      // asking exactly one short question — the next pre-qualification item — except the
+      // final closing message, which contains the QUALIFICATION_COMPLETE block. If the model
+      // wandered off (defined something, answered a random question, misclassified input,
+      // etc.) the reply will either NOT end in a question mark, or will be unusually long
+      // (rambling/explaining instead of briefly asking). Either signal means the model left
+      // the script, regardless of which topic it wandered into.
+      const hasCompletionBlock = reply.includes("<QUALIFICATION_COMPLETE>");
+      // Allow a trailing parenthetical of answer options after the question mark,
+      // e.g. "What's your credit score range? (Below 580, 580-669, ...)"
+      const endsWithQuestion = /\?\s*(\([^)]*\))?\s*$/.test(reply.trim());
+      const isTooLong = reply.length > 400;
+      const structurallyOffTopic = !hasCompletionBlock && (!endsWithQuestion || isTooLong);
+
+      const isOffTopic = keywordMatch || structurallyOffTopic;
       if (isOffTopic) {
         // Figure out which question we're on based on message history
         const count = messages.filter((m: {role: string}) => m.role === "assistant").length;
