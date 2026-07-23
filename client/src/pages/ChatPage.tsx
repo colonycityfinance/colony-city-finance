@@ -61,24 +61,40 @@ export default function ChatPage() {
   const API_BASE = "https://colony-city-finance.onrender.com";
 
   const callPerplexityAPI = async (history: ChatMessage[]): Promise<string> => {
-    // Retry up to 3 times with a short delay — handles sandbox cold-start
-    for (let attempt = 1; attempt <= 5; attempt++) {
+    // Retry ONLY on network failures/timeouts (e.g. Render free-tier cold start not
+    // yet listening) — those are safe to retry. Do NOT retry on a clean error response
+    // from our own server (500, 401, etc): that means the backend is already up and
+    // told us the request failed (e.g. Perplexity API key/credits issue). Retrying that
+    // just re-fires the same billed API call and burns through credits even faster
+    // without fixing anything, so we fail fast instead.
+    const maxAttempts = 2;
+    let lastNetworkError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let response: Response;
       try {
-        const response = await fetch(`${API_BASE}/api/chat`, {
+        response = await fetch(`${API_BASE}/api/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ messages: history.map(m => ({ role: m.role, content: m.content })) }),
           signal: AbortSignal.timeout(30000), // 30s per attempt
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      } catch (err) {
+        // Network error / timeout / aborted request — likely a cold start, safe to retry once.
+        lastNetworkError = err;
+        if (attempt === maxAttempts) throw err;
+        await new Promise(r => setTimeout(r, 4000));
+        continue;
+      }
+
+      if (response.ok) {
         const data = await response.json();
         return data.reply ?? "";
-      } catch (err) {
-        if (attempt === 5) throw err;
-        await new Promise(r => setTimeout(r, 3000 * attempt)); // 3s, 6s, 9s, 12s
       }
+
+      // Server is reachable and responded with a real error — don't retry, fail fast.
+      throw new Error(`HTTP ${response.status}`);
     }
-    throw new Error("Chat unavailable");
+    throw lastNetworkError instanceof Error ? lastNetworkError : new Error("Chat unavailable");
   };
 
   const sendMessage = async (userMsg: string) => {
